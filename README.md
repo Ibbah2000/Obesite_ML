@@ -11,7 +11,6 @@ UCI - Estimation of Obesity Levels
 - Logit ordonné
 - Random Forest
 - Arbre de décision
-- LDA / QDA / SVM
 
-## Auteurs
-Projet de groupe — M1 MECEN, Université de Tours, 2026
+
+
