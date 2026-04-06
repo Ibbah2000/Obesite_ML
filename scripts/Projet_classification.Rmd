@@ -1,0 +1,822 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-03-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+set.seed(42)
+library(tidyverse)
+# Importation de la base de données
+data <- read.csv("C:/Users/ibrah/Desktop/Obesite_ML/data/ObesityDataSet.csv", 
+                 stringsAsFactors = FALSE)
+
+df <- data %>% dplyr::select(-Height, -Weight)
+names(df)
+```
+
+
+```{r}
+library(corrplot)
+library(ggplot2)
+library(kableExtra)
+library(tidyverse)
+library(knitr)
+library(dplyr)
+library(rsample)
+library(rpart.plot)
+library(rpart)
+library(e1071)
+library(reshape2)
+library(klaR)
+library(MASS)
+library(tidymodels)
+library(caret)
+library(randomForest)
+```
+
+
+
+# Nettoyage et Facteurs
+
+```{r}
+vars_qualitatives <- c("Gender","family_history_with_overweight","FAVC","CAEC",
+"SMOKE","SCC","CALC","MTRANS")
+
+df[vars_qualitatives] <- lapply(df[vars_qualitatives], as.factor)
+
+```
+
+
+# Encodage de la variable cible NObeyesdad (Facteur ORDONNÉ)
+
+```{r}
+niveaux_poids <- c("Insufficient_Weight", "Normal_Weight",
+                   "Overweight_Level_I", "Overweight_Level_II",
+                   "Obesity_Type_I", "Obesity_Type_II", "Obesity_Type_III")
+
+df$NObeyesdad <- factor(df$NObeyesdad, levels = niveaux_poids, ordered = TRUE)
+
+
+n<-nrow(df)
+N<-round(n*0.70)
+Train <- sample(1:n,N)
+df_Train <- df %>% slice(Train)
+df_Test <- df %>% slice (-Train)
+df_split <- initial_split(df, prop = 0.70, strata = NObeyesdad)
+
+df_Train_model <- df_Train
+df_Test_model  <- df_Test
+
+df_Train_model$NObeyesdad <- as.factor(df_Train_model$NObeyesdad)
+df_Test_model$NObeyesdad  <- as.factor(df_Test_model$NObeyesdad)
+```
+
+
+# Visualisation de la variable cible
+
+```{r}
+ggplot(df_Train, aes(x = NObeyesdad, fill = NObeyesdad)) +
+  geom_bar() +
+  coord_flip() + # On tourne le graphique pour mieux lire les noms
+  theme_minimal() +
+  labs(title = "Répartition des classes d'obésité (Base d'entraînement)",
+       x = "Catégorie",
+       y = "Nombre d'individus") +
+  theme(legend.position = "none")
+```
+
+
+
+## Partie QDA/LDA/SVM
+
+# Age par classe
+
+```{r}
+ggplot(df_Train, aes(x = NObeyesdad, y = Age, fill = NObeyesdad)) +
+  geom_boxplot() +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Distribution de l'âge selon les catégories d'obésité",
+    x = "Catégorie d'obésité",
+    y = "Âge"
+  ) +
+  theme(legend.position = "none")
+```
+# Activité physique (FAF)
+
+```{r}
+ggplot(df_Train, aes(x = NObeyesdad, y = FAF, fill = NObeyesdad)) +
+  geom_boxplot() +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Distribution de l'activité physique (FAF) selon les catégories d'obésité",
+    x = "Catégorie d'obésité",
+    y = "Fréquence d'activité physique (FAF)"
+  ) +
+  theme(legend.position = "none")
+```
+# Corrélations
+
+```{r}
+vars_quanti <- c("Age","FCVC", "NCP", "CH2O", "FAF", "TUE")
+corr_matrix <- cor(df_Train[, vars_quanti])
+
+
+corrplot(
+  corr_matrix,
+  method = "color",
+  tl.cex = 0.8,
+  title = "Matrice de corrélation des variables quantitatives",
+  mar = c(0,0,2,0) # espace pour le titre
+)
+```
+
+# Modèle LDA
+
+```{r}
+modele_lda <- lda(NObeyesdad ~ ., data = df_Train)
+
+
+modele_lda
+```
+
+
+```{r}
+pred_lda <- predict(modele_lda, newdata = df_Test)
+
+classe_lda <- pred_lda$class
+```
+
+```{r}
+
+
+table(as.character(classe_lda), as.character(df_Test_model$NObeyesdad))
+
+
+acc_lda <- mean(as.character(classe_lda) == as.character(df_Test_model$NObeyesdad))
+acc_lda
+```
+
+
+
+
+```{r}
+mat_lda <- table(
+  Prediction = as.character(classe_lda),
+  Reel = as.character(df_Test_model$NObeyesdad)
+)
+
+mat_lda
+```
+
+
+```{r}
+mat_lda_df <- as.data.frame(mat_lda)
+
+ggplot(mat_lda_df, aes(x = Reel, y = Prediction, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black", size = 3) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Matrice de confusion - LDA",
+    x = "Classe réelle",
+    y = "Classe prédite"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+pred_lda_train <- predict(modele_lda)
+
+lda_df <- data.frame(
+  LD1 = pred_lda_train$x[,1],
+  LD2 = pred_lda_train$x[,2],
+  Classe = df_Train_model$NObeyesdad
+)
+
+ggplot(lda_df, aes(x = LD1, y = LD2, color = Classe)) +
+  geom_point(alpha = 0.7, size = 2) +
+  theme_minimal() +
+  labs(
+    title = "Projection des individus sur les axes discriminants - LDA",
+    x = "Axe discriminant 1",
+    y = "Axe discriminant 2"
+  )
+```
+
+
+
+# QDA 
+
+```{r}
+modele_qda <- rda(
+  NObeyesdad ~ .,
+  data = df_Train_model,
+  gamma = 0.1,   
+  lambda = 0    
+)
+```
+
+
+```{r}
+pred_qda <- predict(modele_qda, df_Test_model)$class
+
+mat_qda <- table(
+  Prediction = as.character(pred_qda),
+  Reel = as.character(df_Test_model$NObeyesdad)
+)
+
+mat_qda
+```
+
+
+```{r}
+acc_qda <- mean(as.character(pred_qda) == as.character(df_Test_model$NObeyesdad))
+acc_qda
+```
+
+
+```{r}
+mat_qda_df <- as.data.frame(mat_qda)
+
+ggplot(mat_qda_df, aes(x = Reel, y = Prediction, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), size = 3) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Matrice de confusion - QDA",
+    x = "Classe réelle",
+    y = "Classe prédite"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
+# SVM 
+
+```{r}
+modele_svm <- svm(
+  NObeyesdad ~ .,
+  data = df_Train_model,
+  kernel = "radial"
+)
+```
+
+
+```{r}
+pred_svm <- predict(modele_svm, newdata = df_Test_model)
+```
+
+
+```{r}
+mat_svm <- table(
+  Prediction = as.character(pred_svm),
+  Reel = as.character(df_Test_model$NObeyesdad)
+)
+
+mat_svm
+```
+
+
+```{r}
+acc_svm <- mean(as.character(pred_svm) == as.character(df_Test_model$NObeyesdad))
+acc_svm
+```
+
+
+
+
+```{r}
+results_final <- data.frame(
+  Modele = c("LDA", "QDA", "SVM"),
+  Accuracy = c(acc_lda, acc_qda, acc_svm)
+)
+
+results_final$Accuracy <- paste0(round(as.numeric(results_final$Accuracy) * 100, 1), " %")
+
+kable(results_final, caption = "Comparaison des performances des modèles") %>%
+  kable_styling(full_width = FALSE, position = "center")
+```
+
+
+
+
+# Modèle logit multinomial Ordonné
+
+
+```{r}
+modele_ordonne <- polr(NObeyesdad ~., 
+                       data   = df_Train, 
+                       method = "logistic",
+                       Hess   = TRUE)
+
+
+tableau_coef <- coef(summary(modele_ordonne))
+
+
+p_values <- pnorm(abs(tableau_coef[, "t value"]), lower.tail = FALSE) * 2
+
+ 
+odds_ratios <- exp(tableau_coef[, "Value"])
+
+
+tableau_complet <- cbind(
+  "Coefficient" = round(tableau_coef[, "Value"], 4),
+  "t value"     = round(tableau_coef[, "t value"], 4),
+  "p-value"     = round(p_values, 4),
+  "Odds Ratio"  = round(odds_ratios, 2)
+)
+
+rownames(tableau_complet) <- gsub("\\|", " -> ", 
+                                   rownames(tableau_complet))
+
+
+kable(tableau_complet, 
+      caption = "Résultats du modèle Logit Ordonné : Coefficients et Odds Ratios") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = F)
+```
+```{r}
+pred_ordonne <- predict(modele_ordonne, newdata = df_Test)
+
+
+# Matrice de confusion en tableau
+cm <- confusionMatrix(pred_ordonne, df_Test$NObeyesdad)
+
+kable(cm$table,
+      caption = "Matrice de confusion — Logit ordonné") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+```{r}
+# Sensitivity, Specificity, F1 par classe
+metriques <- cm$byClass[ , c("Sensitivity", "Specificity", "F1")]
+
+kable(round(metriques, 3),
+      caption = "Métriques par classe — Logit ordonné") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r}
+library(pROC)
+
+# 1. Calcul des probabilités prédites 
+prob_ordonne <- predict(modele_ordonne, 
+                        newdata = df_Test, 
+                        type    = "probs")
+
+classes  <- levels(df_Test$NObeyesdad)
+couleurs <- c("#A32D2D","#C04030","#D85A30","#BA7517","#1D9E75","#085041","#0B2E22")
+
+# 2. Calcul des AUC par classe et de l'AUC moyenne
+auc_values <- sapply(classes, function(classe) {
+  roc_obj <- roc(as.numeric(df_Test$NObeyesdad == classe),
+                 prob_ordonne[, classe], quiet = TRUE)
+  auc(roc_obj)
+})
+
+
+
+# 3. Tracé du graphique avec les 7 courbes ROC
+# Premier tracé (pour initialiser le graphique)
+roc1 <- roc(as.numeric(df_Test$NObeyesdad == classes[1]),
+            prob_ordonne[, classes[1]], quiet = TRUE)
+
+plot(roc1, col = couleurs[1], lwd = 2,
+     main = "Courbes ROC — Logit ordonné",
+     xlab = "1 - Spécificité", ylab = "Sensibilité")
+
+# Ajout des 6 autres courbes avec une boucle
+for (i in 2:7) {
+  roc_i <- roc(as.numeric(df_Test$NObeyesdad == classes[i]),
+               prob_ordonne[, classes[i]], quiet = TRUE)
+  lines(roc_i, col = couleurs[i], lwd = 2)
+}
+
+
+legend("bottomright", legend = classes,
+       col = couleurs, lwd = 2, cex = 0.7)
+
+tableau_auc <- data.frame(
+  "Catégorie" = c(classes, "Moyenne Globale"),
+  "AUC"       = c(round(auc_values, 3), round(mean(auc_values), 3))
+)
+
+# 2. Affichage  avec kable
+kable(tableau_auc, 
+      caption = "Aire Sous la Courbe (AUC) par classe — Logit Ordonné",
+      row.names = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  row_spec(8, bold = TRUE, background = "#F4F6F6") 
+
+
+
+```
+
+## Premier arbre avec paramètre non restrient
+### Création du premier arbre
+```{r}
+
+control.max <- rpart.control(cp = 0, maxdepth = 30, minbucket = 1, minsplit = 1)
+tree <- rpart(NObeyesdad~. , data = df_Train, control = control.max,
+            parms = list(split = "information"))
+
+
+
+```
+
+
+### Premier visualisation premier arbre
+```{r}
+prp(tree, 
+    type = 0, 
+    extra = 1, 
+    split.box.col = "lightblue", 
+    cex = 0.5,        # Taille du texte général
+    split.cex = 0.8,  # Réduit spécifiquement le texte des bulles de décision
+    faclen = 3)       # Abrège les noms des catégories (ex: "Fml" au lieu de "Female")
+
+```
+
+
+### importance des variables premier arbre
+```{r}
+# 1. Extraction et calcul à partir de l'arbre complet (tree)
+imp_full <- tree$variable.importance
+
+df_importance_full <- data.frame(
+  Variable = names(imp_full),
+  Importance = as.numeric(imp_full)
+) %>%
+  mutate(
+    # Calcul de l'importance relative en %
+    Importance_Relative = (Importance / sum(Importance)) * 100
+  ) %>%
+  arrange(desc(Importance)) # Toujours trier pour la lisibilité
+
+# 2. Rendu du tableau avec kableExtra
+df_importance_full %>%
+  kable(
+    col.names = c("Variable", "Score Brut", "Importance (%)"),
+    caption = "Importance des variables (Modèle complet avant élagage)",
+    digits = 1,
+    align = "lcc",
+    booktabs = TRUE # Pour un look plus "publication"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  # Dégradé de couleur pour le score brut
+  column_spec(2, 
+    color = "white",
+    background = spec_color(df_importance_full$Importance, end = 0.8, option = "magma"),
+    bold = TRUE
+  ) %>%
+  # Mise en évidence de la colonne pourcentage
+  column_spec(3, 
+    width = "3cm",
+    bold = TRUE,
+    color = "#2c3e50"
+  ) %>%
+  # Personnalisation de l'en-tête
+  row_spec(0, bold = TRUE, color = "white", background = "#d35400") # Orange pour différencier du pruned
+```
+
+
+
+### Première matrice de confusion
+```{r}
+# Pour la phase d'interprétation (votre rapport) : Précisez bien que la variable est 
+# intrinsèquement ordinale. Expliquez que votre modèle prédit des classes qui se suivent
+# logiquement, même si vous avez utilisé un encodage nominal pour faciliter les calculs.
+
+
+pred.tree <- predict(tree, newdata = df_Train, type = "class")
+table(pred.tree, df_Train[,15])
+
+# Variable NObeyesdad en facteur non ordonné pour être du même type que les autres facteurs
+# mean(pred.tree != df_Train[,15])
+# = 0
+```
+
+
+## Optimisation de l'arbre
+### Création des échantillons de validation croisée pour évaluer la robustesse du modèle.
+```{r}
+data_cv <- vfold_cv(df_Train, v = 10, repeats = 5, strata = NObeyesdad)
+```
+
+
+### Définition de la recette de préparation et de la structure de l'arbre de décision.
+```{r}
+rec <- recipe(NObeyesdad ~ ., data = df_Train)
+tree_spec <- decision_tree() |> 
+  set_engine("rpart") |> 
+  set_mode("classification")
+```
+
+
+### Consultation des fonctions de contrôle des hyperparamètres disponibles.
+```{r}
+cost_complexity()
+min_n()
+tree_depth()
+```
+
+
+### Assemblage du workflow incluant le modèle avec paramètres à optimiser et la recette.
+```{r}
+# workflow avec paramètres à choisir
+tune_tree_wf <- workflow() |> 
+  add_model(tree_spec |> 
+              set_args(cost_complexity = tune(), min_n = tune())
+            ) |>
+  add_recipe(rec)
+```
+
+
+### Création de la grille de recherche et lancement de l'optimisation des hyperparamètres.
+```{r}
+# Grille optimisée pour éviter le surapprentissage
+tree_grid <- grid_regular(cost_complexity(range = c(-4, -1)),
+                          min_n(range = c(2, 40)),
+                          levels = c(10, 5)
+                          )
+
+tree_tune_res <- tune_grid(
+  tune_tree_wf, # le workflow
+  resamples = data_cv, # les échantillons de validation croisée
+  grid = tree_grid, # la grille des valeurs à tester
+  metrics = metric_set(accuracy) # la métrique pour choisir la meilleur valeur
+)
+```
+
+
+### Visualisation des performances et extraction des meilleurs paramètres trouvés.
+On peut maintenant visualiser les résultats, sélectionner la *meilleure* valeur du paramètre et définir le workflow final avec la valeur choisie.
+```{r}
+autoplot(tree_tune_res)
+tree_tune_res |> show_best(metric = "accuracy")
+best_parameters <- select_best(tree_tune_res, metric = "accuracy")
+```
+
+
+### Calcul de l'intervalle de confiance de la précision par un test statistique.
+```{r}
+tree_metrics_train <- collect_metrics(tree_tune_res, summarize = FALSE)
+estimate_error <- tree_metrics_train |> 
+  semi_join(best_parameters, by = names(best_parameters)) |> 
+  pull(.estimate)
+t.test(estimate_error)$conf.int
+```
+
+
+### Mise à jour du workflow avec les paramètres optimaux sélectionnés.
+```{r}
+final_tune_tree_wf <- tune_tree_wf |> 
+  finalize_workflow(best_parameters)
+```
+
+
+### Exécution du test final sur les données mises de côté pour valider la généralisation.
+```{r}
+# Assure-toi d'avoir ton objet df_split disponible
+tree_fit <- final_tune_tree_wf |> 
+  last_fit(split = df_split)
+```
+
+
+### Génération et affichage des courbes ROC pour évaluer la discrimination par classe.
+```{r}
+predictions <- tree_fit |> collect_predictions()
+
+predictions |> 
+  # On prend les colonnes .pred_ MAIS on retire .pred_class
+  roc_curve(NObeyesdad, starts_with(".pred_"), -.pred_class) |> 
+  autoplot()
+```
+
+
+### Visualisation graphique de l'arbre de décision final pour l'interprétation.
+
+
+```{r}
+tree_fit |> 
+  extract_fit_engine() |> 
+  rpart.plot::prp(type = 0, extra = 1, 
+                  split.box.col = "lightblue",
+                  roundint = FALSE)
+```
+## Visualisation apres élagage supplémentaire
+
+```{r}
+tree_engine <- tree_fit |> extract_fit_engine()
+
+tree_pruned <- rpart::prune(tree_engine, cp = 0.01)
+
+rpart.plot::prp(tree_pruned,
+                type = 0,
+                extra = 1,
+                split.box.col = "lightblue",
+                roundint = FALSE)
+```
+
+
+### Entraînement final du modèle sur l'intégralité du jeu de données pour export.
+```{r}
+final_model <-  final_tune_tree_wf |> 
+  fit(df) # données complètes
+```
+
+
+### Sauvegarde du modèle final dans un fichier externe pour une utilisation future.
+```{r}
+save(final_model, file = "mymodel.RData")
+```
+
+### nétoyage environnement
+```{r}
+rm(best_parameters, a_predire, final_tune_tree_wf,predictions, rec, tree_fit, tree_grid,
+   tree_metrics_train, tree_tune_res, tree_spec, tune_tree_wf, temps, estimate_error, i)
+```
+
+
+### matrice de confusion de l'arbre élagué
+```{r}
+pred.final_model <- predict(final_model, new_data = df_Train, type = "class")
+
+table(Prediction = pred.final_model$.pred_class, Reel = df_Train$NObeyesdad)
+```
+
+# Random Forest
+```{r}
+# ── 1. Définition du modèle ──────────────────────────────────
+random_forest_spec <- rand_forest(
+  mtry  = tune(), 
+  min_n = tune(), 
+  trees = tune()
+) %>%
+  set_engine("randomForest", importance = TRUE) %>%
+  set_mode("classification")
+```
+
+```{r}
+# ── 2. Recette ───────────────────────────────────────────────
+rec_rf <- recipe(NObeyesdad ~ ., data = df_Train)
+# ── 3. Workflow ──────────────────────────────────────────────
+tune_rf_wf <- workflow() %>%
+  add_model(random_forest_spec) %>%
+  add_recipe(rec_rf)
+```
+
+```{r}
+# ── 4. Paramètres à optimiser ────────────────────────────────
+rf_param <- extract_parameter_set_dials(tune_rf_wf) %>%
+  update(
+    mtry  = mtry(c(2, 8)),
+    trees = trees(c(100, 500))
+  )
+grid_regular(rf_param, levels = c(mtry = 3, trees = 3, min_n = 4))
+```
+
+```{r}
+#install.packages("future")
+#install.packages("doFuture")
+library(future)
+library(doFuture)
+
+# ── 5. Tuning avec parallélisation ──────────────────────────
+plan(multisession, workers = parallel::detectCores() - 1)
+registerDoFuture()
+
+system.time(
+  rf_tune_res <- tune_grid(
+    tune_rf_wf,
+    resamples = data_cv,
+    grid      = grid_regular(rf_param, 
+                             levels = c(mtry = 3, trees = 3, min_n = 4)),
+    metrics   = metric_set(accuracy),
+    control   = control_grid(parallel_over = "resamples")
+  )
+)
+
+plan(sequential)
+```
+
+```{r}
+# ── 6. Visualisation et meilleurs paramètres ─────────────────
+autoplot(rf_tune_res) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+rf_tune_res %>% show_best(metric = "accuracy")
+best_rf_parameters <- select_best(rf_tune_res, metric = "accuracy")
+rf_metrics_train <- collect_metrics(rf_tune_res, summarize = FALSE)
+estimate_rf_accuracy <- rf_metrics_train %>%
+  semi_join(best_rf_parameters, by = names(best_rf_parameters)) %>%
+  pull(.estimate)
+estimate_rf_error <- 1 - estimate_rf_accuracy
+t.test(estimate_rf_error)$conf.int
+
+# Finalisation
+final_rf_wf    <- tune_rf_wf %>% finalize_workflow(best_rf_parameters)
+rf_fit         <- final_rf_wf %>% last_fit(split = df_split)
+rf_train_model <- final_rf_wf %>% fit(data = df_Train)
+
+rf_fit %>% collect_metrics()
+# courbe roc
+library(ggplot2)
+
+p <- rf_fit %>%
+  collect_predictions() %>%
+  roc_curve(NObeyesdad, starts_with(".pred_"), -.pred_class) %>%
+  mutate(.level = case_when(
+    .level == "Insufficient_Weight"  ~ "Insuff_W",
+    .level == "Normal_Weight"        ~ "Normal_W",
+    .level == "Overweight_Level_I"   ~ "Overw_I",
+    .level == "Overweight_Level_II"  ~ "Overw_II",
+    .level == "Obesity_Type_I"       ~ "Obese_I",
+    .level == "Obesity_Type_II"      ~ "Obese_II",
+    .level == "Obesity_Type_III"     ~ "Obese_III"
+  )) %>%
+  autoplot() +
+  labs(title = "Courbes ROC — Random Forest") +
+  theme_minimal(base_size = 11) +
+  theme(
+    strip.text    = element_text(size = 8, face = "bold"),
+    plot.title    = element_text(size = 14, face = "bold", hjust = 0.5),
+    panel.spacing = unit(0.8, "lines")
+  )
+
+ggsave("roc_rf.png", plot = p, width = 12, height = 8, dpi = 150)
+print(p)
+```
+
+```{r}
+# ── CHUNK 4 : Importance des variables ───────────────────────
+
+rf_engine <- rf_train_model %>% extract_fit_engine()
+
+# Graphique 
+varImpPlot(rf_engine,
+           main = "Importance des variables — Random Forest",
+           cex  = 0.8)
+
+# Tableau importance
+importance_df <- as.data.frame(importance(rf_engine)) %>%
+  rownames_to_column("Variable") %>%
+  arrange(desc(MeanDecreaseGini)) %>%
+  mutate(Importance_Relative = (MeanDecreaseGini / sum(MeanDecreaseGini)) * 100)
+importance_df %>%
+  mutate(across(where(is.numeric), ~ round(., 2))) %>%
+  kable(caption = "Importance des variables — Random Forest") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE, position = "center") %>%
+  column_spec(2, color = "white",
+              background = spec_color(importance_df$MeanDecreaseGini,
+                                      end = 0.8, option = "magma"),
+              bold = TRUE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#2ecc71")
+
+
+
+```
+
+```{r}
+rf_fit %>% collect_predictions() %>%
+  conf_mat(truth = NObeyesdad, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+
+
+
+
+
+```{r}
+
+# modèle final
+
+
+
+
+
+
+# Modèle final sur données complètes (comme la prof)
+final_rf_model <- final_rf_wf %>% fit(df)
+save(final_rf_model, file = "my_rf_model.RData")
+
+```
+
